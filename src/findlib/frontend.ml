@@ -31,10 +31,18 @@ let sys_error code arg =
   else
     Sys_error (arg ^ ": " ^ Unix.error_message code)
 
+let is_win = Sys.os_type = "Win32"
+
+let () =
+  match Findlib_config.system with
+    | "win32" | "win64" | "mingw" | "cygwin" | "mingw64" | "cygwin64" ->
+      (try set_binary_mode_out stdout true with _ -> ());
+      (try set_binary_mode_out stderr true with _ -> ());
+    | _ -> ()
 
 let slashify s =
   match Findlib_config.system with
-    | "mingw" | "mingw64" | "cygwin" ->
+    | "win32" | "win64" | "mingw" | "cygwin" | "mingw64" | "cygwin64" ->
         let b = Buffer.create 80 in
         String.iter
           (function
@@ -49,7 +57,7 @@ let slashify s =
 
 let out_path ?(prefix="") s =
   match Findlib_config.system with
-    | "mingw" | "mingw64" | "cygwin" ->
+   | "win32" | "win64" | "mingw" | "mingw64" | "cygwin" ->
 	let u = slashify s in
 	prefix ^ 
 	  (if String.contains u ' ' then
@@ -273,11 +281,9 @@ let is_dll p =
 
 
 let identify_dir d =
-  match Sys.os_type with
-    | "Win32" ->
-	failwith "identify_dir"   (* not available *)
-    | _ ->
-	let s = Unix.stat d in
+  if is_win then
+    failwith "identify_dir";   (* not available *)
+  let s = Unix.stat d in
 	(s.Unix.st_dev, s.Unix.st_ino)
 ;;
 
@@ -459,6 +465,96 @@ let select_pp_packages syntax_preds packages =
       )
       packages
 
+let rewrite_cmd s =
+  if s = "" || not is_win then
+    s
+  else
+    let s =
+      let l = String.length s in
+      let b = Buffer.create l in
+      for i = 0 to pred l do
+        match s.[i] with
+        | '/' -> Buffer.add_char b '\\'
+        | x -> Buffer.add_char b x
+      done;
+      Buffer.contents b
+    in
+    if (Filename.is_implicit s && String.contains s '\\' = false) ||
+      Filename.check_suffix (String.lowercase s) ".exe" then
+      s
+    else
+      let s' = s ^ ".exe" in
+      if Sys.file_exists s' then
+        s'
+      else
+        s
+
+let rewrite_cmd s =
+  if s = "" || not is_win then s else
+  let s =
+    let l = String.length s in
+    let b = Buffer.create l in
+    for i = 0 to pred l do
+      match s.[i] with
+      | '/' -> Buffer.add_char b '\\'
+      | x -> Buffer.add_char b x
+    done;
+    Buffer.contents b
+  in
+  if (Filename.is_implicit s && String.contains s '\\' = false) ||
+     Filename.check_suffix (String.lowercase s) ".exe" then
+    s
+  else
+    let s' = s ^ ".exe" in
+    if Sys.file_exists s' then
+      s'
+    else
+      s
+
+let rewrite_pp cmd =
+  if not is_win then cmd else
+  let module T = struct exception Keep end in
+  let is_whitespace = function
+  | ' ' | '\011' | '\012' | '\n' | '\r' | '\t' -> true
+  | _ -> false in
+  (* characters that triggers special behaviour (cmd.exe, not unix shell) *)
+  let is_unsafe_char = function
+  | '(' | ')' | '%' | '!' | '^' | '<' | '>' | '&' -> true
+  | _ -> false in
+  let len = String.length cmd in
+  let buf = Buffer.create (len + 4) in
+  let buf_cmd = Buffer.create len in
+  let rec iter_ws i =
+    if i >= len then () else
+    let cur = cmd.[i] in
+    if is_whitespace cur then (
+      Buffer.add_char buf cur;
+      iter_ws (succ i)
+    )
+    else
+      iter_cmd i
+  and iter_cmd i =
+    if i >= len then add_buf_cmd () else
+    let cur = cmd.[i] in
+    if is_unsafe_char cur || cur = '"' || cur = '\'' then
+      raise T.Keep;
+    if is_whitespace cur then (
+      add_buf_cmd ();
+      Buffer.add_substring buf cmd i (len - i)
+    )
+    else (
+      Buffer.add_char buf_cmd cur;
+      iter_cmd (succ i)
+    )
+  and add_buf_cmd () =
+    if Buffer.length buf_cmd > 0 then
+      Buffer.add_string buf (rewrite_cmd (Buffer.contents buf_cmd))
+  in
+  try
+    iter_ws 0;
+    Buffer.contents buf
+  with
+  | T.Keep -> cmd
 
 let process_pp_spec syntax_preds packages pp_opts =
   (* Returns: pp_command *)
@@ -549,7 +645,7 @@ let process_pp_spec syntax_preds packages pp_opts =
       None -> []
     | Some cmd ->
 	["-pp";
-	 cmd ^ " " ^
+	 (rewrite_cmd cmd) ^ " " ^
 	 String.concat " " (List.map Filename.quote pp_i_options) ^ " " ^
 	 String.concat " " (List.map Filename.quote pp_archives) ^ " " ^
 	 String.concat " " (List.map Filename.quote pp_opts)]
@@ -625,9 +721,11 @@ let process_ppx_spec predicates packages ppx_opts =
           in
           try
             let preprocessor =
+              rewrite_cmd (
               resolve_path
                 ~base ~explicit:true
-                (package_property predicates pname "ppx") in
+                  (package_property predicates pname "ppx") )
+            in
             ["-ppx"; String.concat " " (preprocessor :: options)]
           with Not_found -> []
        )
@@ -895,6 +993,14 @@ let contracted_ocamlmklib_options =
        switch (e.g. -L<path> instead of -L <path>)
      *)
 
+(* We may need to remove files on which we do not have complete control.
+   On Windows, removing a read-only file fails so try to change the
+   mode of the file first. *)
+let remove_file fname =
+  try Sys.remove fname
+  with Sys_error _ when is_win ->
+    (try Unix.chmod fname 0o666 with Unix.Unix_error _ -> ());
+    Sys.remove fname
 
 let ocamlc which () =
 
@@ -1025,9 +1131,12 @@ let ocamlc which () =
               
 	      "-intf", 
 	      Arg.String (fun s -> pass_files := !pass_files @ [ Intf(slashify s) ]);
-              
+
 	      "-pp", 
-	      Arg.String (fun s -> pp_specified := true; add_spec_fn "-pp" s);
+	      Arg.String (fun s -> pp_specified := true; add_spec_fn "-pp" (rewrite_pp s));
+
+              "-ppx",
+              Arg.String (fun s -> add_spec_fn "-ppx" (rewrite_pp s));
 	      
 	      "-thread", 
               Arg.Unit (fun _ -> support_threads(); threads := threads_default);
@@ -1240,7 +1349,7 @@ let ocamlc which () =
     with
       any ->
 	close_out initl;
-	Sys.remove initl_file_name;
+	remove_file initl_file_name;
 	raise any
   end;
 
@@ -1248,9 +1357,9 @@ let ocamlc which () =
     at_exit
       (fun () ->
 	let tr f x = try f x with _ -> () in
-	tr Sys.remove initl_file_name;
-	tr Sys.remove (Filename.chop_extension initl_file_name ^ ".cmi");
-	tr Sys.remove (Filename.chop_extension initl_file_name ^ ".cmo");
+	tr remove_file initl_file_name;
+	tr remove_file (Filename.chop_extension initl_file_name ^ ".cmi");
+	tr remove_file (Filename.chop_extension initl_file_name ^ ".cmo");
       );
 
   let exclude_list = [ stdlibdir; threads_dir; vmthreads_dir ] in
@@ -1496,7 +1605,9 @@ let ocamldoc() =
 	  [ "-v", Arg.Unit (fun () -> verbose := Verbose);
 	    "-pp", Arg.String (fun s ->
 				 pp_specified := true;
-				 options := !options @ ["-pp"; s]);
+				 options := !options @ ["-pp"; rewrite_pp s]);
+            "-ppx", Arg.String (fun s ->
+				 options := !options @ ["-ppx"; rewrite_pp s]);
 	  ]
       )
     )
@@ -1675,7 +1786,9 @@ let ocamldep () =
 	      Arg.String (fun s -> add_spec_fn "-I" (slashify (resolve_path s)));
 
 	      "-pp", Arg.String (fun s -> pp_specified := true;
-		 	           add_spec_fn "-pp" s);
+                           add_spec_fn "-pp" (rewrite_pp s));
+              "-ppx", Arg.String (fun s -> add_spec_fn "-ppx" (rewrite_pp s));
+
 	    ]
 	)
     )
@@ -1833,7 +1946,10 @@ let copy_file ?(rename = (fun name -> name)) ?(append = "") src dstdir =
       output_string ch_out append;
       close_out ch_out;
       close_in ch_in;
-      Unix.utimes outpath s.Unix.st_mtime s.Unix.st_mtime;
+      (try Unix.utimes outpath s.Unix.st_mtime s.Unix.st_mtime
+       with Unix.Unix_error(e,_,_) ->
+         prerr_endline("Warning: setting utimes for " ^ outpath
+                       ^ ": " ^ Unix.error_message e));
 
       prerr_endline("Installed " ^ outpath);
     with
@@ -1891,6 +2007,8 @@ let find_owned_files pkg dir =
              Unix.openfile (Filename.concat dir owner_file) [Unix.O_RDONLY] 0 in
            let f =
              Unix.in_channel_of_descr fd in
+           if is_win then
+             set_binary_mode_in f false;
            try
              let line = trim_cr (input_line f) in
              let is_my_file = (line = pkg) in
@@ -2222,7 +2340,7 @@ let install_package () =
     let lines = read_ldconf !ldconf in
     let dlldir_norm = Fl_split.norm_dir dlldir in
     let dlldir_norm_lc = string_lowercase_ascii dlldir_norm in
-    let ci_filesys = (Sys.os_type = "Win32") in
+    let ci_filesys = is_win in
     let check_dir d =
       let d' = Fl_split.norm_dir d in
       (d' = dlldir_norm) || 
@@ -2347,6 +2465,9 @@ let remove_package () =
         | Unix.Unix_error(Unix.ENOENT,_,_) ->
             prerr_endline ("ocamlfind: [WARNING] No such file: " ^ f);
             false
+        | Unix.Unix_error(Unix.EACCES,_,_) when is_win ->
+            remove_file f;
+            true
         | Unix.Unix_error(code, _, arg) ->
             raise(sys_error code arg)
     ) else
@@ -2359,6 +2480,9 @@ let remove_package () =
         | Unix.Unix_error(Unix.ENOENT,_,_) ->
             prerr_endline ("ocamlfind: [WARNING] No such file: " ^ f);
             false
+        | Unix.Unix_error(Unix.EACCES,_,_) when is_win ->
+            remove_file f;
+            true
         | Unix.Unix_error(code, _, arg) ->
             raise(sys_error code arg) in
 
@@ -2370,7 +2494,7 @@ let remove_package () =
       List.iter
         (fun file ->
            let absfile = Filename.concat dlldir file in
-           Sys.remove absfile;
+           remove_file absfile;
            prerr_endline ("Removed " ^ absfile)
         )
         dll_files
@@ -2379,7 +2503,7 @@ let remove_package () =
     (* Remove the files from the package directory: *)
     if Sys.file_exists pkgdir then begin
       let files = Sys.readdir pkgdir in
-      Array.iter (fun f -> Sys.remove (Filename.concat pkgdir f)) files;
+      Array.iter (fun f -> remove_file (Filename.concat pkgdir f)) files;
       Unix.rmdir pkgdir;
       prerr_endline ("Removed " ^ pkgdir)
     end
@@ -2429,7 +2553,9 @@ let list_packages() =
 
 
 let print_configuration() =
+  let sl = slashify in
   let dir s =
+    let s = sl s in
     if Sys.file_exists s then
       s
     else
@@ -2467,27 +2593,27 @@ let print_configuration() =
 	   if md = "" then "the corresponding package directories" else dir md
 	  );
 	Printf.printf "The standard library is assumed to reside in:\n    %s\n"
-	  (Findlib.ocaml_stdlib());
+    (sl (Findlib.ocaml_stdlib()));
 	Printf.printf "The ld.conf file can be found here:\n    %s\n"
-	  (Findlib.ocaml_ldconf());
+    (sl (Findlib.ocaml_ldconf()));
 	flush stdout
     | Some "conf" ->
-	print_endline (Findlib.config_file())
+  print_endline (sl (Findlib.config_file()))
     | Some "path" ->
-	List.iter print_endline (Findlib.search_path())
+  List.iter ( fun x -> print_endline (sl x)) (Findlib.search_path())
     | Some "destdir" ->
-	print_endline (Findlib.default_location())
+  print_endline (sl (Findlib.default_location()))
     | Some "metadir" ->
-	print_endline (Findlib.meta_directory())
+  print_endline (sl (Findlib.meta_directory()))
     | Some "metapath" ->
         let mdir = Findlib.meta_directory() in
         let ddir = Findlib.default_location() in
 	print_endline 
-          (if mdir <> "" then mdir ^ "/META.%s" else ddir ^ "/%s/META")
+          (sl (if mdir <> "" then mdir ^ "/META.%s" else ddir ^ "/%s/META"))
     | Some "stdlib" ->
-	print_endline (Findlib.ocaml_stdlib())
+  print_endline (sl (Findlib.ocaml_stdlib()))
     | Some "ldconf" ->
-	print_endline (Findlib.ocaml_ldconf())
+  print_endline (sl (Findlib.ocaml_ldconf()))
     | _ ->
 	assert false
 ;;
@@ -2495,7 +2621,7 @@ let print_configuration() =
 
 let ocamlcall pkg cmd =
   let dir = package_directory pkg in
-  let path = Filename.concat dir cmd in
+  let path = rewrite_cmd (Filename.concat dir cmd) in
   begin
     try Unix.access path [ Unix.X_OK ]
     with
@@ -2660,6 +2786,10 @@ let main() =
       exit 2
   | Sys_error f ->
       prerr_endline ("ocamlfind: " ^ f);
+      exit 2
+  | Unix.Unix_error (e, fn, f) ->
+      prerr_endline ("ocamlfind: " ^ fn ^ " " ^ f
+                     ^ ": " ^ Unix.error_message e);
       exit 2
   | Findlib.No_such_package(pkg,info) ->
       prerr_endline ("ocamlfind: Package `" ^ pkg ^ "' not found" ^

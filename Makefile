@@ -57,16 +57,16 @@ findlib.conf: findlib.conf.in
 	    $(SH) tools/patch '@SITELIB@' '$(OCAML_SITELIB)' | \
 			$(SH) tools/patch '@FINDLIB_PATH@' '$(FINDLIB_PATH)' -p >findlib.conf
 	if ./tools/cmd_from_same_dir ocamlc; then \
-		echo 'ocamlc="ocamlc.opt"' >>findlib.conf; \
+		echo 'ocamlc="ocamlc.opt$(EXEC_SUFFIX)"' >>findlib.conf; \
 	fi
 	if ./tools/cmd_from_same_dir ocamlopt; then \
-		echo 'ocamlopt="ocamlopt.opt"' >>findlib.conf; \
+		echo 'ocamlopt="ocamlopt.opt$(EXEC_SUFFIX)"' >>findlib.conf; \
 	fi
 	if ./tools/cmd_from_same_dir ocamldep; then \
-		echo 'ocamldep="ocamldep.opt"' >>findlib.conf; \
+		echo 'ocamldep="ocamldep.opt$(EXEC_SUFFIX)"' >>findlib.conf; \
 	fi
 	if ./tools/cmd_from_same_dir ocamldoc; then \
-		echo 'ocamldoc="ocamldoc.opt"' >>findlib.conf; \
+		echo 'ocamldoc="ocamldoc.opt$(EXEC_SUFFIX)"' >>findlib.conf; \
 	fi
 
 .PHONY: install-doc

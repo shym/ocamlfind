@@ -23,3 +23,5 @@ let dll_suffix =
     | "MacOS"            -> ""        (* don't know *)
     | _ -> failwith "Unknown Sys.os_type"
 ;;
+
+let exec_suffix = "@EXEC_SUFFIX@";;

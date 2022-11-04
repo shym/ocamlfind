@@ -93,6 +93,7 @@ findlib_config.ml: findlib_config.mlp $(TOP)/Makefile.config
 	cat findlib_config.mlp | \
 	        $(SH) $(TOP)/tools/patch '@CONFIGFILE@' '$(OCAMLFIND_CONF)' | \
 	        $(SH) $(TOP)/tools/patch '@STDLIB@' '$(OCAML_CORE_STDLIB)' | \
+			$(SH) $(TOP)/tools/patch '@EXEC_SUFFIX@' '$(EXEC_SUFFIX)' | \
 		sed -e 's;@AUTOLINK@;$(OCAML_AUTOLINK);g' \
 		    -e 's;@SYSTEM@;$(SYSTEM);g' \
 		     >findlib_config.ml

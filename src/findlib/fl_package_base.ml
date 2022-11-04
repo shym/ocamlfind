@@ -133,7 +133,15 @@ let packages_in_meta_file ?(directory_required = false)
 	  List.find (fun def -> def.def_var = "exists_if") p.package_defs  in
 	let files = Fl_split.in_words def.def_value in
 	List.exists 
-	  (fun file -> Sys.file_exists (Filename.concat d' file))
+	  (fun file ->
+            let fln = Filename.concat d' file in
+            let e = Sys.file_exists fln in
+            (* necessary for ppx executables *)
+            if e || Sys.os_type <> "Win32" || Filename.check_suffix fln ".exe" then
+              e
+            else
+              Sys.file_exists (fln ^ ".exe")
+          )
 	  files
       with Not_found -> true in
 
