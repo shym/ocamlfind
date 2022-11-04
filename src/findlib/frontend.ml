@@ -5,6 +5,22 @@
 
 open Findlib;;
 
+let char_lowercase_ascii c =
+  (* Char.lowercase_ascii and String.lowercase_ascii first available in
+     OCaml-4.03, but we want to support earlier versions too
+   *)
+  if (c >= 'A' && c <= 'Z')
+  then Char.unsafe_chr(Char.code c + 32)
+  else c
+
+let string_lowercase_ascii s =
+  let n = String.length s in
+  let b = Bytes.create n in
+  for i = 0 to n - 1 do
+    Bytes.unsafe_set b i (char_lowercase_ascii (String.unsafe_get s i))
+  done;
+  Bytes.to_string b
+
 exception Usage;;
 exception Silent_error;;
   
@@ -2136,23 +2152,6 @@ let meta_pkg meta_name =
   | Fl_metascanner.Error s ->
     close_in f;
     failwith ("Cannot parse '" ^ meta_name ^ "': " ^ s)
-
-let char_lowercase_ascii c =
-  (* Char.lowercase_ascii and String.lowercase_ascii first available in
-     OCaml-4.03, but we want to support earlier versions too
-   *)
-  if (c >= 'A' && c <= 'Z')
-  then Char.unsafe_chr(Char.code c + 32)
-  else c
-
-let string_lowercase_ascii s =
-  let n = String.length s in
-  let b = Bytes.create n in
-  for i = 0 to n - 1 do
-    Bytes.unsafe_set b i (char_lowercase_ascii (String.unsafe_get s i))
-  done;
-  Bytes.to_string b
-
 
 let install_package () =
   let destdir = ref (default_location()) in
