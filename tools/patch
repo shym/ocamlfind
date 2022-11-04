@@ -23,6 +23,6 @@ else
     esac
 fi
 
-sed -e 's;'"$varname"';'"$varvalue"';g'
+sed -e 's%'"$varname"'%'"$varvalue"'%g'
 # e.g. c:\\\\file is parsed by sed as c:\\file which is correct for the
 # ocaml string
