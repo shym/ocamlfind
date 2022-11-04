@@ -494,7 +494,7 @@ let rewrite_cmd s =
     Buffer.contents b
   in
   if (Filename.is_implicit s && String.contains s '\\' = false) ||
-     Filename.check_suffix (String.lowercase s) ".exe" then
+     Filename.check_suffix (string_lowercase_ascii s) ".exe" then
     s
   else
     let s' = s ^ ".exe" in
