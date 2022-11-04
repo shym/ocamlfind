@@ -482,30 +482,6 @@ let select_pp_packages syntax_preds packages =
       packages
 
 let rewrite_cmd s =
-  if s = "" || not is_win then
-    s
-  else
-    let s =
-      let l = String.length s in
-      let b = Buffer.create l in
-      for i = 0 to pred l do
-        match s.[i] with
-        | '/' -> Buffer.add_char b '\\'
-        | x -> Buffer.add_char b x
-      done;
-      Buffer.contents b
-    in
-    if (Filename.is_implicit s && String.contains s '\\' = false) ||
-      Filename.check_suffix (String.lowercase s) ".exe" then
-      s
-    else
-      let s' = s ^ ".exe" in
-      if Sys.file_exists s' then
-        s'
-      else
-        s
-
-let rewrite_cmd s =
   if s = "" || not is_win then s else
   let s =
     let l = String.length s in
